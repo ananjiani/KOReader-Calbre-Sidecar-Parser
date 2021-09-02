@@ -1,13 +1,19 @@
 import sqlite3
 import pandas as pd
 import json
-import psycopg2
+from sqlalchemy import create_engine
+from dbtools import config
 
 # conn = psycopg2.connect(
 #     host="localhost",
 #     database="books",
 #     user="postgres"
 # )
+
+
+# connect to the PostgreSQL server
+
+
 
 con = sqlite3.connect("/home/ammar/Calibre Library/metadata.db")
 
@@ -59,14 +65,18 @@ for index, row in sdr_df.iterrows():
 
 con.close()
 
-b_con = sqlite3.connect("books.db")
+print('Connecting to the PostgreSQL database...')
+# read connection parameters
+params = config()
+con = create_engine("postgresql+psycopg2://{}:{}@{}:{}/{}".format(params['user'], params['password'], params['host'], params['port'], params['database']))
 
 cur_dfs = {
-    'books': pd.read_sql_query("SELECT * FROM books", b_con),
-    'annotations': pd.read_sql_query("SELECT * FROM annotations", b_con),
-    'books_tags_link': pd.read_sql_query("SELECT * FROM books_tags_link", b_con),
-    'tags': pd.read_sql_query("SELECT * FROM tags", b_con)
+    'books': pd.read_sql_query("SELECT * FROM books", con),
+    'annotations': pd.read_sql_query("SELECT * FROM annotations", con),
+    'books_tags_link': pd.read_sql_query("SELECT * FROM books_tags_link", con),
+    'tags': pd.read_sql_query("SELECT * FROM tags", con)
 }
+
 
 final_dfs = {
     'books' : pd.concat([cur_dfs['books'].reset_index(drop = True), books_df]).drop_duplicates(keep=False),
@@ -77,6 +87,6 @@ final_dfs = {
 
 for k, v in final_dfs.items():
     print(k, v)
-    v.to_sql(k, b_con, if_exists = 'append', index = False)
+    v.to_sql(k, con, if_exists = 'append', index = False)
 
 

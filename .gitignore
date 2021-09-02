@@ -2,3 +2,4 @@ database.ini
 books.db
 myenv
 .vscode
+__pycache__
