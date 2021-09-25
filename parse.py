@@ -3,6 +3,18 @@ import pandas as pd
 import json
 from sqlalchemy import create_engine
 from dbtools import config, pull_from_calibre, update_db
+import re
+
+def parse_note(highlight, note):
+    
+    if highlight in note:
+        note = re.sub("Page [0-9]+ ", '', note)
+        note = re.sub(" @ [0-9]+[-][0-9]+[-][0-9]+ [0-9]+[:][0-9]+[:][0-9]+", '', note)
+        note = note.replace(highlight, '')
+
+    
+    return note
+
 
 def parse_sidecar(data, book):
     bookmarks = pd.DataFrame(columns = ['datetime', 'chapter', 'text', 'pos0', 'pos1'])
@@ -38,6 +50,9 @@ def parse_sidecar(data, book):
 
     # combine highlights and bookmarks, redefine as "annotations"
     a = highlights.merge(bookmarks, on=['datetime', 'chapter', 'pos0', 'pos1'], how='outer').rename(columns={'text_x': 'highlight', 'text_y': 'note', 'pos0': 'location'})[['highlight', 'note', 'location', 'chapter', 'datetime']]
+    
+    a.loc[pd.notna(a['note']), 'note'] = [parse_note(h, n) for h, n in a[pd.notna(a['note'])][['highlight', 'note']].itertuples(index=False)]
+    print(a['note'])
     a['book'] = book
 
     return a
