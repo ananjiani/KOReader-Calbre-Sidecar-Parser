@@ -2,22 +2,9 @@ import sqlite3
 import pandas as pd
 import json
 from sqlalchemy import create_engine
-from dbtools import config
+from dbtools import config, pull_from_calibre, update_db
 
-# get data from Calibre database
-con = sqlite3.connect("/home/ammar/Calibre Library/metadata.db")
-books_df = pd.read_sql_query("SELECT id, title, sort, author_sort, pubdate, uuid FROM books", con).rename(columns={'author_sort': 'author'})
-sdr_df = pd.read_sql_query("SELECT book, value FROM custom_column_6", con)
-books_tags_link_df = pd.read_sql_query("SELECT book, tag FROM books_tags_link", con)
-tags_df = pd.read_sql_query("SELECT id, name FROM tags", con)
-
-# define columns for annotations df
-annotations = pd.DataFrame(columns = ['book', 'highlight', 'note', 'location', 'chapter', 'datetime'])
-
-# iterate through each book's KOReader Sync json
-for index, row in sdr_df.iterrows():
-    val = row['value']
-    data = json.loads(val)
+def parse_sidecar(data, book):
     bookmarks = pd.DataFrame(columns = ['datetime', 'chapter', 'text', 'pos0', 'pos1'])
     highlights = pd.DataFrame(columns = ['datetime', 'chapter', 'text', 'pos0', 'pos1'])
 
@@ -51,39 +38,34 @@ for index, row in sdr_df.iterrows():
 
     # combine highlights and bookmarks, redefine as "annotations"
     a = highlights.merge(bookmarks, on=['datetime', 'chapter', 'pos0', 'pos1'], how='outer').rename(columns={'text_x': 'highlight', 'text_y': 'note', 'pos0': 'location'})[['highlight', 'note', 'location', 'chapter', 'datetime']]
-    a['book'] = row['book']
+    a['book'] = book
 
-    # store all the annotations for current book
-    annotations = pd.concat([annotations, a]).reset_index(drop = True)
+    return a
 
-con.close()
+def parse_all_sidecars(df):
+    # define columns for annotations df
+    annotations = pd.DataFrame(columns = ['book', 'highlight', 'note', 'location', 'chapter', 'datetime'])
 
-print('Connecting to the PostgreSQL database...')
-# read connection parameters
-params = config()
-con = create_engine("postgresql+psycopg2://{}:{}@{}:{}/{}".format(params['user'], params['password'], params['host'], params['port'], params['database']))
+    for index, row in df.iterrows():
+        val = row['value']
+        data = json.loads(val)
 
-# purpose of the following is for our db to keep its own records, rather than being exactly the same as calibre's
+        a = parse_sidecar(data, row['book'])
 
-# get the current values in the database for each table. 
-cur_dfs = {
-    'books': pd.read_sql_query("SELECT * FROM books", con),
-    'annotations': pd.read_sql_query("SELECT * FROM annotations", con),
-    'books_tags_link': pd.read_sql_query("SELECT * FROM books_tags_link", con),
-    'tags': pd.read_sql_query("SELECT * FROM tags", con)
-}
+        # store all the annotations for current book
+        annotations = pd.concat([annotations, a]).reset_index(drop = True)
 
-# add the values from calibre
-final_dfs = {
-    'books' : pd.concat([cur_dfs['books'].reset_index(drop = True), books_df]).drop_duplicates(keep=False),
-    'annotations' : pd.concat([cur_dfs['annotations'].reset_index(drop = True), annotations]).drop_duplicates(keep=False),
-    'books_tags_link' : pd.concat([cur_dfs['books_tags_link'].reset_index(drop = True), books_tags_link_df]).drop_duplicates(keep=False),
-    'tags' : pd.concat([cur_dfs['tags'].reset_index(drop = True), tags_df]).drop_duplicates(keep=False)
-}
+    return annotations
 
-# send dataframe to postgres table
-for k, v in final_dfs.items():
-    print(k, v)
-    v.to_sql(k, con, if_exists = 'append', index = False)
+def run_all(path):
+    # get data from Calibre database
+    tables = pull_from_calibre(path)
 
+    tables['annotations'] = parse_all_sidecars(tables['sdr'])
 
+    print('Connecting to the PostgreSQL database...')
+    # read connection parameters
+    params = config()
+    con = create_engine("postgresql+psycopg2://{}:{}@{}:{}/{}".format(params['user'], params['password'], params['host'], params['port'], params['database']))
+
+    update_db(tables, con)

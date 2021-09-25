@@ -3,3 +3,5 @@ books.db
 myenv
 .vscode
 __pycache__
+run.py
+test.csv
