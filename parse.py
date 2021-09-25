@@ -4,17 +4,6 @@ import json
 from sqlalchemy import create_engine
 from dbtools import config
 
-# conn = psycopg2.connect(
-#     host="localhost",
-#     database="books",
-#     user="postgres"
-# )
-
-
-# connect to the PostgreSQL server
-
-
-
 con = sqlite3.connect("/home/ammar/Calibre Library/metadata.db")
 
 
