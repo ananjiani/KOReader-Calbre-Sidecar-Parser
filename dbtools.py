@@ -3,63 +3,13 @@ import psycopg2
 import sqlite3
 import pandas as pd
 
-
-def config(filename='database.ini', section='postgresql'):
-    # create a parser
-    parser = ConfigParser()
-    # read config file
-    parser.read(filename)
-
-    # get section, default to postgresql
-    db = {}
-    if parser.has_section(section):
-        params = parser.items(section)
-        for param in params:
-            db[param[0]] = param[1]
-    else:
-        raise Exception('Section {0} not found in the {1} file'.format(section, filename))
-
-    return db
-
-def connect():
-    """ Connect to the PostgreSQL database server """
-    conn = None
-    try:
-        # read connection parameters
-        params = config()
-
-        # connect to the PostgreSQL server
-        print('Connecting to the PostgreSQL database...')
-        conn = psycopg2.connect(**params)
-		
-        # create a cursor
-        cur = conn.cursor()
-        
-	# execute a statement
-        print('PostgreSQL database version:')
-        cur.execute('SELECT version()')
-
-        # display the PostgreSQL database server version
-        db_version = cur.fetchone()
-        print(db_version)
-
-        cur.execute('SELECT * from books')
-        print("Result ", cur.fetchall())
-       
-	# close the communication with the PostgreSQL
-        cur.close()
-    except (Exception, psycopg2.DatabaseError) as error:
-        print(error)
-    finally:
-        if conn is not None:
-            conn.close()
-            print('Database connection closed.')
-
 def pull_from_calibre(path):
     con = sqlite3.connect(path)
     tables = {
-        'books' : pd.read_sql_query("SELECT id, title, sort, author_sort, pubdate, uuid FROM books", con).rename(columns={'author_sort': 'author'}),
-        'sdr' : pd.read_sql_query("SELECT book, value FROM custom_column_6", con),
+        'author' : pd.read_sql_query("SELECT id, sort FROM authors", con),
+        'books' : pd.read_sql_query("SELECT id, title, pubdate FROM books", con),
+        'books_authors_link' : pd.read_sql_query("SELECT id, book, author FROM books_authors_link", con),
+        'sdr' : pd.read_sql_query("SELECT id, book, value FROM custom_column_6", con),
         'books_tags_link' : pd.read_sql_query("SELECT book, tag FROM books_tags_link", con),
         'tags' : pd.read_sql_query("SELECT id, name FROM tags", con)
     }

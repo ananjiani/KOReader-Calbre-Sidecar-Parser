@@ -2,19 +2,21 @@ import sqlite3
 import pandas as pd
 import json
 from sqlalchemy import create_engine
-from dbtools import config, pull_from_calibre, update_db
+from dbtools import pull_from_calibre
 import re
 
+# TODO: parse tags in notes
+# create dataframe of tags with private keys to relate to annotations.
+# annotations should also have private keys.
+# just replace entire database interaction code with django rest api.
 def parse_note(highlight, note):
     
     if highlight in note:
         note = re.sub("Page [0-9]+ ", '', note)
         note = re.sub(" @ [0-9]+[-][0-9]+[-][0-9]+ [0-9]+[:][0-9]+[:][0-9]+", '', note)
         note = note.replace(highlight, '')
-
     
     return note
-
 
 def parse_sidecar(data, book):
     bookmarks = pd.DataFrame(columns = ['datetime', 'chapter', 'text', 'pos0', 'pos1'])
@@ -72,15 +74,3 @@ def parse_all_sidecars(df):
 
     return annotations
 
-def run_all(path):
-    # get data from Calibre database
-    tables = pull_from_calibre(path)
-
-    tables['annotations'] = parse_all_sidecars(tables['sdr'])
-
-    print('Connecting to the PostgreSQL database...')
-    # read connection parameters
-    params = config()
-    con = create_engine("postgresql+psycopg2://{}:{}@{}:{}/{}".format(params['user'], params['password'], params['host'], params['port'], params['database']))
-
-    update_db(tables, con)
