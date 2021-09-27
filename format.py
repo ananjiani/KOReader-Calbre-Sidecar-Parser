@@ -38,7 +38,9 @@ def create_if_not_exists(df, url, col):
             r_df['tags'] = r_df['tags'].apply(tuple)
         merged = df.merge(r_df, how='left', on=col, indicator=True).rename(
             columns={'id_x': 'cid', 'id_y': 'rid'})  # cid is calibre id, rid is request id
-        # create a dataframe containing calibre's id for the item, and the id generated for the item from the API
+        # create a dataframe containing calibre's id for the item, and the id
+
+        # generated for the item from the API
         item_ids = merged[merged['_merge'] == 'both'][['cid', 'rid']]
         # dataframe of items to POST
         items_to_add = merged[merged['_merge'] == 'left_only'][col + ['cid']]
@@ -78,8 +80,13 @@ def prepare_all(in_tables):
         tables['author'], 'http://localhost:8000/brain2_api/author/', ['fname', 'lname'])
 
     # replace author ids from calibre with author ids from API
-    b_a_link = pd.merge(in_tables['books_authors_link'], author_ids, left_on='author', right_on='cid', how='left')[
-        ['book', 'rid']].rename(columns={'rid': 'author'})
+    b_a_link = pd.merge(
+        in_tables['books_authors_link'],
+        author_ids,
+        left_on='author',
+        right_on='cid',
+        how='left'
+    )[['book', 'rid']].rename(columns={'rid': 'author'})
     # collapse rows down to a single book and a tuple of author ids
     b_a_link = b_a_link.groupby(['book'])['author'].apply(tuple).to_frame()
 
@@ -88,8 +95,13 @@ def prepare_all(in_tables):
         tables['book_tag'], 'http://localhost:8000/brain2_api/book_tag/', ['name'])
 
     # as above but with the tags
-    b_t_link = pd.merge(in_tables['books_tags_link'], book_tag_ids, left_on='tag', right_on='cid', how='left')[
-        ['book', 'rid']].rename(columns={'rid': 'tag'})
+    b_t_link = pd.merge(
+        in_tables['books_tags_link'], 
+        book_tag_ids, 
+        left_on='tag', 
+        right_on='cid', 
+        how='left'
+    )[['book', 'rid']].rename(columns={'rid': 'tag'})
     b_t_link = b_t_link.groupby(['book'])['tag'].apply(tuple).to_frame()
 
     # combine book author ids and tags ids into one
@@ -103,6 +115,7 @@ def prepare_all(in_tables):
     books.loc[pd.isna(books['published']), 'published'] = '0001-01-01'
     books.loc[pd.isna(books['tags']), 'tags'] = (None)
 
+    # POST books
     book_ids = create_if_not_exists(
         books, 'http://localhost:8000/brain2_api/book/', ['title', 'published', 'author', 'tags'])
-    print(book_ids)
+    
