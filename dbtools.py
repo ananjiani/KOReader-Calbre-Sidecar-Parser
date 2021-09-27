@@ -8,7 +8,7 @@ def pull_from_calibre(path):
     tables = {
         'author' : pd.read_sql_query("SELECT id, sort FROM authors", con),
         'books' : pd.read_sql_query("SELECT id, title, pubdate FROM books", con),
-        'books_authors_link' : pd.read_sql_query("SELECT id, book, author FROM books_authors_link", con),
+        'books_authors_link' : pd.read_sql_query("SELECT book, author FROM books_authors_link", con),
         'sdr' : pd.read_sql_query("SELECT id, book, value FROM custom_column_6", con),
         'books_tags_link' : pd.read_sql_query("SELECT book, tag FROM books_tags_link", con),
         'tags' : pd.read_sql_query("SELECT id, name FROM tags", con)
