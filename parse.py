@@ -3,21 +3,19 @@ import json
 from dbtools import pull_from_calibre
 import re
 
-# TODO: parse tags in notes
-# create dataframe of tags with private keys to relate to annotations.
-# annotations should also have private keys.
-# just replace entire database interaction code with django rest api.
 
+def parse_note(highlight, annotation):
+    if highlight in annotation:
+        annotation = re.sub(r'Page [0-9]+ ', '', annotation)
+        annotation = re.sub(
+            r'@ [0-9]+[-][0-9]+[-][0-9]+ [0-9]+[:][0-9]+[:][0-9]+', '', annotation)
+        annotation = annotation.replace(highlight, '')
 
-def parse_note(highlight, note):
-
-    if highlight in note:
-        note = re.sub("Page [0-9]+ ", '', note)
-        note = re.sub(
-            " @ [0-9]+[-][0-9]+[-][0-9]+ [0-9]+[:][0-9]+[:][0-9]+", '', note)
-        note = note.replace(highlight, '')
-
-    return note
+    tags = tuple([s.replace('#','') for s in re.findall(r'#[\w-]+', annotation)])
+    for tag in tags:
+        annotation = annotation.replace(f'#{tag}', '')
+    annotation = annotation.strip()
+    return annotation, tags
 
 
 def parse_sidecar(data, book):
@@ -55,21 +53,23 @@ def parse_sidecar(data, book):
             )
 
     # combine highlights and bookmarks, redefine as "annotations"
-    a = highlights.merge(bookmarks, on=['datetime', 'chapter', 'pos0', 'pos1'], how='outer').rename(columns={
-        'text_x': 'highlight', 'text_y': 'note', 'pos0': 'location'})[['highlight', 'note', 'location', 'chapter', 'datetime']]
+    note = highlights.merge(bookmarks, on=['datetime', 'chapter', 'pos0', 'pos1'], how='outer').rename(columns={
+        'text_x': 'highlight', 'text_y': 'annotation', 'pos0': 'location'})[['highlight', 'annotation', 'location', 'chapter', 'datetime']]
 
-    a.loc[pd.notna(a['note']), 'note'] = [parse_note(h, n) for h, n in a[pd.notna(
-        a['note'])][['highlight', 'note']].itertuples(index=False)]
-    print(a['note'])
-    a['book'] = book
+    note['annotation'] = note['annotation'].fillna('')
+    note['tags'] = None
+    note.loc[pd.notna(note['annotation']), ['annotation', 'tags']] = [parse_note(h, a) for h, a in note[pd.notna(
+        note['annotation'])][['highlight', 'annotation']].itertuples(index=False)]
 
-    return a
+    note['book'] = book
+
+    return note
 
 
 def parse_all_sidecars(df):
     # define columns for annotations df
-    annotations = pd.DataFrame(
-        columns=['book', 'highlight', 'note', 'location', 'chapter', 'datetime'])
+    notes = pd.DataFrame(
+        columns=['book', 'highlight', 'annotation', 'location', 'chapter', 'datetime', 'tags'])
 
     for index, row in df.iterrows():
         val = row['value']
@@ -77,7 +77,8 @@ def parse_all_sidecars(df):
 
         a = parse_sidecar(data, row['book'])
 
-        # store all the annotations for current book
-        annotations = pd.concat([annotations, a]).reset_index(drop=True)
+        # store all the notes for current book
+        notes = pd.concat([notes, a]).reset_index(drop=True)
 
-    return annotations
+    notes['annotation'] = notes['annotation'].fillna('')
+    return notes

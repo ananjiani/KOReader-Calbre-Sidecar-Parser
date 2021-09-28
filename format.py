@@ -1,7 +1,78 @@
 import requests
 import pandas as pd
 import json
+from parse import parse_all_sidecars
 
+
+
+def create_if_not_exists(df, url, col):
+    """Compares items in dataframe against items already in the API and creates items from the dataframe that are not in the API.
+
+    Args:
+        df (pd.Dataframe): A dataframe of items from Calibre to POST to API.
+        url (str): url to request
+        col: unique column names to use for comparing with API.
+
+    Returns:
+        item_ids (pd.Dataframe): A dataframe containing the ID of each item from Calibre mapped to its ID assigned by the API. Useful for establishing relationships between items.
+
+    """
+
+    r = requests.get(url)
+    r_df = pd.DataFrame.from_records(r.json())
+
+    # compare items already in API with ones being added.
+    if not r_df.empty:
+        for c in ['author', 'tags']:
+            if c in r_df.columns:
+                r_df[c] = r_df[c].apply(sorted).apply(tuple)
+
+        orig_columns = list(df.columns)
+        orig_columns.remove('id')
+        merged = df.merge(r_df, how='left', on=col, indicator=True).rename(
+            columns={'id_x': 'cid', 'id_y': 'rid'}) # cid is calibre id, rid is request id
+
+        in_api = merged[merged['_merge'] == 'both']        
+        item_ids = in_api[['cid', 'rid']]
+
+        # condition_to_update = (True)
+        # patch_dfs = []
+        # for s in dupe_cols:
+        #     in_api[in_api[f'{s}_x'] == in_api[f'{s}_y']]
+
+            
+        items_to_add = merged[merged['_merge'] == 'left_only']
+
+        if not items_to_add.empty:
+            dupe_cols = [x for x in orig_columns if x not in col]
+
+            col_to_rename = {}
+            col_to_drop = []
+            for s in dupe_cols:
+                col_to_rename[f'{s}_x'] = s
+                col_to_drop.append(f'{s}_y')
+            items_to_add = items_to_add.rename(columns=col_to_rename).drop(columns=col_to_drop)[orig_columns + ['cid']]
+    else:
+        item_ids = pd.DataFrame(columns=['cid', 'rid'])
+        items_to_add = df.rename(columns={'id': 'cid'})
+
+    for index, row in items_to_add.iterrows():
+        # Construct Payload
+        payload = {}
+        for i in items_to_add.columns:
+            payload[i] = row[i]
+        r = requests.post(url, data=payload)
+        r_json = r.json()
+        print(r_json)
+        # store ids
+        item_ids = item_ids.append({
+            'cid': row['cid'],
+            'rid': r_json['id']
+        }, ignore_index=True)
+
+    item_ids['rid'] = item_ids['rid'].astype(int)
+
+    return item_ids
 
 def prepare_author(df):
 
@@ -14,57 +85,33 @@ def prepare_author(df):
 
     return df[['id', 'fname', 'lname']]
 
+def prepare_note_tags(df):
+    df = df['tags'].explode('tags').dropna().drop_duplicates()
+    return df.to_frame(name='name')
 
-def create_if_not_exists(df, url, col):
-    """Compares items in dataframe against items already in the API and creates items from the dataframe that are not in the API.
+def post_note_tags(df, url):
+    url += 'note_tag/'
+    df['id'] = df['name']
+    return create_if_not_exists(df, url, ['name']).rename(columns={'cid' : 'name', 'rid' : 'id'})
 
-    Args:
-        df (pd.Dataframe): A dataframe of items from Calibre to POST to API.
-        url (str): url to request
-        col: column names from dataframe to get data from to construct POST payload.
+def convert_tags_to_ids(tags, tag_ids):
+    ret_tags = []
+    print(tag_ids)
+    for t in tags:
+        ret_tags.append(tag_ids.loc[tag_ids['name'] == t, ['id']].iloc[0].iloc[0])
+    ret_tags = sorted(ret_tags)
 
-    Returns:
-        item_ids (pd.Dataframe): A dataframe containing the ID of each item from Calibre mapped to its ID assigned by the API. Useful for establishing relationships between items.
+    return tuple(ret_tags)
 
-    """
+def prepare_notes(df, tag_ids):
+    df['tags'] = [convert_tags_to_ids(t, tag_ids) for t in df['tags']]
+    df['id'] = None
+    return df
 
-    r = requests.get(url)
-    r_df = pd.DataFrame.from_records(r.json())
-
-    # compare items already in API with ones being added.
-    if not r_df.empty:
-        if 'author' in col and 'tags' in col:
-            r_df['author'] = r_df['author'].apply(tuple)
-            r_df['tags'] = r_df['tags'].apply(tuple)
-        merged = df.merge(r_df, how='left', on=col, indicator=True).rename(
-            columns={'id_x': 'cid', 'id_y': 'rid'})  # cid is calibre id, rid is request id
-        # create a dataframe containing calibre's id for the item, and the id
-
-        # generated for the item from the API
-        item_ids = merged[merged['_merge'] == 'both'][['cid', 'rid']]
-        # dataframe of items to POST
-        items_to_add = merged[merged['_merge'] == 'left_only'][col + ['cid']]
-    else:
-        item_ids = pd.DataFrame(columns=['cid', 'rid'])
-        items_to_add = df.rename(columns={'id': 'cid'})
-
-    for index, row in items_to_add.iterrows():
-        # Construct Payload
-        payload = {}
-        for i in col:
-            payload[i] = row[i]
-        r = requests.post(url, data=payload)
-
-        # store ids
-        item_ids = item_ids.append({
-            'cid': row['cid'],
-            'rid': r.json()['id']
-        }, ignore_index=True)
-
-    item_ids['rid'] = item_ids['rid'].astype(int)
-
-    return item_ids
-
+def post_notes(df, url):
+    url += 'note/'
+    
+    return create_if_not_exists(df, url, ['book', 'highlight', 'chapter'])
 
 def prepare_all(in_tables):
     tables = {
@@ -74,6 +121,8 @@ def prepare_all(in_tables):
         'note_tag': '',
         'note': ''
     }
+
+    url = 'http://localhost:8000/brain2_api/'
 
     # POST authors, store assigned ids
     author_ids = create_if_not_exists(
@@ -86,7 +135,7 @@ def prepare_all(in_tables):
         left_on='author',
         right_on='cid',
         how='left'
-    )[['book', 'rid']].rename(columns={'rid': 'author'})
+    )[['book', 'rid']].rename(columns={'rid': 'author'}).sort_values(['book', 'author'])
     # collapse rows down to a single book and a tuple of author ids
     b_a_link = b_a_link.groupby(['book'])['author'].apply(tuple).to_frame()
 
@@ -98,10 +147,10 @@ def prepare_all(in_tables):
     b_t_link = pd.merge(
         in_tables['books_tags_link'], 
         book_tag_ids, 
-        left_on='tag', 
+        left_on='tag',
         right_on='cid', 
         how='left'
-    )[['book', 'rid']].rename(columns={'rid': 'tag'})
+    )[['book', 'rid']].rename(columns={'rid': 'tag'}).sort_values(['book', 'tag'])
     b_t_link = b_t_link.groupby(['book'])['tag'].apply(tuple).to_frame()
 
     # combine book author ids and tags ids into one
@@ -117,5 +166,15 @@ def prepare_all(in_tables):
 
     # POST books
     book_ids = create_if_not_exists(
-        books, 'http://localhost:8000/brain2_api/book/', ['title', 'published', 'author', 'tags'])
+        books, 'http://localhost:8000/brain2_api/book/', ['title', 'author'])
+
+    notes = parse_all_sidecars(in_tables['sdr'])
+
+    note_tags = prepare_note_tags(notes)
+    note_tag_ids = post_note_tags(note_tags, url)
+
+    notes = prepare_notes(notes, note_tag_ids)
+    notes = notes.merge(book_ids, how='left', left_on='book', right_on='cid').drop(columns=['book', 'cid']).rename(columns={'rid' : 'book'})
+    note_ids = post_notes(notes, url)
+
     
