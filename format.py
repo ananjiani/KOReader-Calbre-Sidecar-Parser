@@ -85,6 +85,50 @@ def prepare_author(df):
 
     return df[['id', 'fname', 'lname']]
 
+def post_author(df, url):
+    return create_if_not_exists(df, url + 'author/', ['fname', 'lname'])
+
+def post_book_tags(df, url):
+    return create_if_not_exists(df, url + 'book_tag/', ['name'])
+
+def prepare_book(tables, url, author_ids, tag_ids):
+    # replace author ids from calibre with author ids from API
+    b_a_link = pd.merge(
+        tables['books_authors_link'],
+        author_ids,
+        left_on='author',
+        right_on='cid',
+        how='left'
+    )[['book', 'rid']].rename(columns={'rid': 'author'}).sort_values(['book', 'author'])
+    # collapse rows down to a single book and a tuple of author ids
+    b_a_link = b_a_link.groupby(['book'])['author'].apply(tuple).to_frame()
+
+    # as above but with the tags
+    b_t_link = pd.merge(
+        tables['books_tags_link'], 
+        tag_ids, 
+        left_on='tag',
+        right_on='cid', 
+        how='left'
+    )[['book', 'rid']].rename(columns={'rid': 'tag'}).sort_values(['book', 'tag'])
+    b_t_link = b_t_link.groupby(['book'])['tag'].apply(tuple).to_frame()
+
+    # combine book author ids and tags ids into one
+    b_a_t_link = pd.merge(b_a_link, b_t_link, on=['book'], how='outer')
+
+    # prepare book data for payload
+    books = pd.merge(tables['books'], b_a_t_link, left_on=['id'], right_on='book', how='outer').rename(
+        columns={'pubdate': 'published', 'tag': 'tags'})
+    books['published'] = pd.to_datetime(
+        books['published'], infer_datetime_format=True, errors='coerce').dt.strftime('%Y-%m-%d')
+    books.loc[pd.isna(books['published']), 'published'] = '0001-01-01'
+    books.loc[pd.isna(books['tags']), 'tags'] = (None)
+
+    return books
+
+def post_book(df, url):
+    return create_if_not_exists(df, url + 'book/', ['title', 'author'])
+
 def prepare_note_tags(df):
     df = df['tags'].explode('tags').dropna().drop_duplicates()
     return df.to_frame(name='name')
@@ -106,6 +150,7 @@ def convert_tags_to_ids(tags, tag_ids):
 def prepare_notes(df, tag_ids):
     df['tags'] = [convert_tags_to_ids(t, tag_ids) for t in df['tags']]
     df['id'] = None
+    df['linked_notes'] = None
     return df
 
 def post_notes(df, url):
@@ -113,68 +158,31 @@ def post_notes(df, url):
     
     return create_if_not_exists(df, url, ['book', 'highlight', 'chapter'])
 
-def prepare_all(in_tables):
-    tables = {
-        'author': prepare_author(in_tables['author']),
-        'book_tag': in_tables['tags'].apply(lambda x: x.str.strip() if x.dtype == "object" else x),
-        'book': in_tables['books'],
-        'note_tag': '',
-        'note': ''
-    }
-
-    url = 'http://localhost:8000/brain2_api/'
+def post_all(tables, url):
+    
+    tables['author'] = prepare_author(tables['author'])
+    tables['book_tag'] = tables['tags'].apply(lambda x: x.str.strip() if x.dtype == "object" else x)
 
     # POST authors, store assigned ids
-    author_ids = create_if_not_exists(
-        tables['author'], 'http://localhost:8000/brain2_api/author/', ['fname', 'lname'])
-
-    # replace author ids from calibre with author ids from API
-    b_a_link = pd.merge(
-        in_tables['books_authors_link'],
-        author_ids,
-        left_on='author',
-        right_on='cid',
-        how='left'
-    )[['book', 'rid']].rename(columns={'rid': 'author'}).sort_values(['book', 'author'])
-    # collapse rows down to a single book and a tuple of author ids
-    b_a_link = b_a_link.groupby(['book'])['author'].apply(tuple).to_frame()
+    author_ids = post_author(tables['author'], url)
 
     # POST book tags
-    book_tag_ids = create_if_not_exists(
-        tables['book_tag'], 'http://localhost:8000/brain2_api/book_tag/', ['name'])
+    book_tag_ids = post_book_tags(tables['book_tag'], url)
 
-    # as above but with the tags
-    b_t_link = pd.merge(
-        in_tables['books_tags_link'], 
-        book_tag_ids, 
-        left_on='tag',
-        right_on='cid', 
-        how='left'
-    )[['book', 'rid']].rename(columns={'rid': 'tag'}).sort_values(['book', 'tag'])
-    b_t_link = b_t_link.groupby(['book'])['tag'].apply(tuple).to_frame()
-
-    # combine book author ids and tags ids into one
-    b_a_t_link = pd.merge(b_a_link, b_t_link, on=['book'], how='outer')
-
-    # prepare book data for payload
-    books = pd.merge(tables['book'], b_a_t_link, left_on=['id'], right_on='book', how='outer').rename(
-        columns={'pubdate': 'published', 'tag': 'tags'})
-    books['published'] = pd.to_datetime(
-        books['published'], infer_datetime_format=True, errors='coerce').dt.strftime('%Y-%m-%d')
-    books.loc[pd.isna(books['published']), 'published'] = '0001-01-01'
-    books.loc[pd.isna(books['tags']), 'tags'] = (None)
-
+    books = prepare_book(tables, url, author_ids, book_tag_ids)
+    
     # POST books
-    book_ids = create_if_not_exists(
-        books, 'http://localhost:8000/brain2_api/book/', ['title', 'author'])
+    book_ids = post_book(books, url)
 
-    notes = parse_all_sidecars(in_tables['sdr'])
+    notes = parse_all_sidecars(tables['sdr'])
 
+    # POST note tags
     note_tags = prepare_note_tags(notes)
     note_tag_ids = post_note_tags(note_tags, url)
 
+    # POST notes
     notes = prepare_notes(notes, note_tag_ids)
     notes = notes.merge(book_ids, how='left', left_on='book', right_on='cid').drop(columns=['book', 'cid']).rename(columns={'rid' : 'book'})
-    note_ids = post_notes(notes, url)
+    post_notes(notes, url)
 
     

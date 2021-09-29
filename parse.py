@@ -1,8 +1,21 @@
 import pandas as pd
 import json
-from dbtools import pull_from_calibre
 import re
+import sqlite3
 
+def pull_from_calibre(path):
+    con = sqlite3.connect(path)
+    tables = {
+        'author': pd.read_sql_query("SELECT id, sort FROM authors", con),
+        'books': pd.read_sql_query("SELECT id, title, pubdate FROM books", con),
+        'books_authors_link': pd.read_sql_query("SELECT book, author FROM books_authors_link", con),
+        'sdr': pd.read_sql_query("SELECT id, book, value FROM custom_column_6", con),
+        'books_tags_link': pd.read_sql_query("SELECT book, tag FROM books_tags_link", con),
+        'tags': pd.read_sql_query("SELECT id, name FROM tags", con)
+    }
+    con.close()
+
+    return tables
 
 def parse_note(highlight, annotation):
     if highlight in annotation:
@@ -16,7 +29,6 @@ def parse_note(highlight, annotation):
         annotation = annotation.replace(f'#{tag}', '')
     annotation = annotation.strip()
     return annotation, tags
-
 
 def parse_sidecar(data, book):
     bookmarks = pd.DataFrame(
@@ -64,7 +76,6 @@ def parse_sidecar(data, book):
     note['book'] = book
 
     return note
-
 
 def parse_all_sidecars(df):
     # define columns for annotations df
