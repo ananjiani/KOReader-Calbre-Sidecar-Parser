@@ -6,10 +6,10 @@ Designed to send data to a self hosted [brain2](https://github.com/AmmarNanjiani
 # Usage
 
 ## Prerequisites
-- Python installed
-- KOReader with the [Calibre plugin](https://git.sr.ht/~harmtemolder/koreader-calibre-plugin).
-- [Calibre](https://github.com/kovidgoyal/calibre)
-- A running local [brain2](https://github.com/AmmarNanjiani/brain2)
+- Python installed.
+- A device with [KOReader](https://github.com/koreader/koreader) installed. 
+- [Calibre](https://github.com/kovidgoyal/calibre) with the [KOReader plugin](https://git.sr.ht/~harmtemolder/koreader-calibre-plugin).
+- A running local instance of [brain2](https://github.com/AmmarNanjiani/brain2).
 
 ## Steps
 1. Modify `config.ini` with the path to Calibre's metadata sqlite3 database, and if it is different from the default, modify the URL for the API. 
